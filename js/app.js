@@ -20,7 +20,9 @@
   const StorageManager = {
     KEYS: {
       TASKS: 'todo-dashboard-tasks',
-      LINKS: 'todo-dashboard-links'
+      LINKS: 'todo-dashboard-links',
+      NAME: 'todo-dashboard-name',
+      THEME: 'todo-dashboard-theme'
     },
 
     /**
@@ -115,6 +117,37 @@
     },
 
     /**
+     * Retrieve a raw string value from localStorage.
+     * @param {string} key
+     * @returns {string|null}
+     */
+    getString(key) {
+      try {
+        return localStorage.getItem(key);
+      } catch (e) {
+        return null;
+      }
+    },
+
+    /**
+     * Store a raw string value in localStorage.
+     * @param {string} key
+     * @param {string} value
+     * @returns {boolean}
+     */
+    setString(key, value) {
+      try {
+        localStorage.setItem(key, value);
+        return true;
+      } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
+          this._showQuotaError();
+        }
+        return false;
+      }
+    },
+
+    /**
      * Display a non-blocking warning banner when storage is unavailable.
      * @private
      */
@@ -157,6 +190,81 @@
   };
 
   // =========================================================================
+  // THEME MANAGER
+  // =========================================================================
+
+  /**
+   * ThemeManager - Manages light/dark theme state, applies CSS via data-theme
+   * attribute on <html>, persists preference to localStorage, and handles the
+   * toggle control with appropriate icon display.
+   */
+  const ThemeManager = {
+    STORAGE_KEY: 'todo-dashboard-theme',
+    THEMES: { LIGHT: 'light', DARK: 'dark' },
+    _currentTheme: 'dark',
+    _toggleBtn: null,
+
+    /**
+     * Initialize ThemeManager. Reads persisted theme (already applied by
+     * inline script), binds toggle button event, and sets initial icon.
+     * @param {HTMLElement} toggleBtn - The theme toggle button element
+     */
+    init(toggleBtn) {
+      this._toggleBtn = toggleBtn;
+
+      // Read persisted theme (inline script already applied it to prevent flash)
+      var stored = StorageManager.getString(StorageManager.KEYS.THEME);
+      if (stored === 'light' || stored === 'dark') {
+        this._currentTheme = stored;
+      } else {
+        this._currentTheme = 'dark';
+      }
+
+      // Bind click event
+      this._toggleBtn.addEventListener('click', () => this.toggle());
+
+      // Set initial icon and aria-pressed state
+      this._updateIcon();
+    },
+
+    /**
+     * Toggle between light and dark themes.
+     * Updates DOM, persists to localStorage, and updates button icon.
+     */
+    toggle() {
+      this._currentTheme = (this._currentTheme === 'dark') ? 'light' : 'dark';
+      this.applyTheme(this._currentTheme);
+      StorageManager.setString(StorageManager.KEYS.THEME, this._currentTheme);
+      this._updateIcon();
+    },
+
+    /**
+     * Apply a theme by setting data-theme attribute on <html>.
+     * @param {string} theme - 'light' or 'dark'
+     */
+    applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+    },
+
+    /**
+     * Update the toggle button icon based on current theme.
+     * Sun icon (☼) when light mode active, Moon icon (☽) when dark mode active.
+     * Also updates aria-pressed attribute for accessibility.
+     * @private
+     */
+    _updateIcon() {
+      if (!this._toggleBtn) return;
+      var iconEl = this._toggleBtn.querySelector('.theme-icon');
+      if (iconEl) {
+        // Sun icon when light, Moon icon when dark
+        iconEl.innerHTML = (this._currentTheme === 'light') ? '&#9788;' : '&#9790;';
+      }
+      // Update aria-pressed: true when light (toggle is "on"), false when dark
+      this._toggleBtn.setAttribute('aria-pressed', this._currentTheme === 'light' ? 'true' : 'false');
+    }
+  };
+
+  // =========================================================================
   // GREETING PANEL
   // =========================================================================
 
@@ -170,19 +278,26 @@
     _timeEl: null,
     _dateEl: null,
     _greetingEl: null,
+    _nameInputEl: null,
+    _storedName: '',
     _lastMinute: null,
     _intervalId: null,
 
     /**
      * Initialize the greeting panel.
-     * Finds DOM elements, renders the initial display, and starts the
-     * 1-second update interval.
+     * Finds DOM elements, loads stored name, binds name input events,
+     * renders the initial display, and starts the 1-second update interval.
      * @param {HTMLElement} containerEl - The greeting panel section element
      */
     init(containerEl) {
       this._timeEl = containerEl.querySelector('#current-time');
       this._dateEl = containerEl.querySelector('#current-date');
       this._greetingEl = containerEl.querySelector('#greeting-message');
+      this._nameInputEl = containerEl.querySelector('#name-input');
+
+      // Load stored name and bind name input events
+      this._loadName();
+      this._bindNameEvents();
 
       // Render immediately on init
       this.updateDisplay();
@@ -267,13 +382,78 @@
      * @returns {string} "Good Morning" (5-11), "Good Afternoon" (12-17), "Good Evening" (18-23, 0-4)
      */
     getGreeting(hour) {
+      var base;
       if (hour >= 5 && hour <= 11) {
-        return 'Good Morning';
+        base = 'Good Morning';
       } else if (hour >= 12 && hour <= 17) {
-        return 'Good Afternoon';
+        base = 'Good Afternoon';
       } else {
-        return 'Good Evening';
+        base = 'Good Evening';
       }
+      if (this._storedName) {
+        return base + ', ' + this._storedName;
+      }
+      return base;
+    },
+
+    /**
+     * Load saved name from localStorage.
+     * Populates _storedName and pre-fills the input field.
+     */
+    _loadName() {
+      var stored = StorageManager.getString(StorageManager.KEYS.NAME);
+      if (stored !== null && stored.trim().length > 0) {
+        this._storedName = stored.trim();
+        if (this._nameInputEl) {
+          this._nameInputEl.value = this._storedName;
+        }
+      } else {
+        this._storedName = '';
+      }
+    },
+
+    /**
+     * Bind blur and Enter key events on the name input to persist the name value.
+     */
+    _bindNameEvents() {
+      if (!this._nameInputEl) return;
+
+      this._nameInputEl.addEventListener('blur', () => {
+        this._saveName();
+      });
+
+      this._nameInputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this._saveName();
+          this._nameInputEl.blur();
+        }
+      });
+    },
+
+    /**
+     * Validate and save the name from the input field.
+     * Trims value, treats whitespace-only as empty.
+     * Max 50 characters (enforced by maxlength attribute + JS truncation as safety net).
+     * Updates _storedName and refreshes the greeting display.
+     */
+    _saveName() {
+      if (!this._nameInputEl) return;
+      var value = this._nameInputEl.value.trim();
+
+      if (value.length === 0) {
+        // Empty or whitespace-only: remove from storage
+        this._storedName = '';
+        StorageManager.remove(StorageManager.KEYS.NAME);
+      } else {
+        // Valid name (maxlength=50 enforced by HTML, truncate as safety net)
+        this._storedName = value.substring(0, 50);
+        StorageManager.setString(StorageManager.KEYS.NAME, this._storedName);
+      }
+
+      // Force greeting update by resetting minute tracker
+      this._lastMinute = null;
+      this.updateDisplay();
     }
   };
 
@@ -589,6 +769,26 @@
     },
 
     /**
+     * Check if a task with the given text already exists in the task list.
+     * Comparison is trimmed and case-insensitive.
+     * Checks against both completed and incomplete tasks.
+     * @param {string} text - The task text to check
+     * @param {string|null} excludeId - Task ID to exclude (for edit operations)
+     * @returns {boolean} true if a duplicate exists
+     */
+    isDuplicate(text, excludeId) {
+      var normalizedNew = text.trim().toLowerCase();
+      if (normalizedNew.length === 0) return false;
+      for (var i = 0; i < this.tasks.length; i++) {
+        if (excludeId && this.tasks[i].id === excludeId) continue;
+        if (this.tasks[i].text.trim().toLowerCase() === normalizedNew) {
+          return true;
+        }
+      }
+      return false;
+    },
+
+    /**
      * Add a new task to the list after validation.
      * Generates a unique ID, appends to the task list, persists to storage,
      * clears the input field, and renders the new task.
@@ -602,6 +802,12 @@
         if (validation.error) {
           this._showError(validation.error);
         }
+        return false;
+      }
+
+      // Duplicate check
+      if (this.isDuplicate(text, null)) {
+        this._showError('This task already exists');
         return false;
       }
 
@@ -721,6 +927,9 @@
         return;
       }
 
+      // Clear any previous duplicate error when starting a new edit
+      this._clearError();
+
       // Create input field pre-filled with current text
       var input = document.createElement('input');
       input.type = 'text';
@@ -738,6 +947,11 @@
 
       // Flag to prevent double-commit from blur firing after Enter
       var committed = false;
+
+      // Clear error when user modifies inline edit input (Req 3.7)
+      input.addEventListener('input', () => {
+        this._clearError();
+      });
 
       // Handle Enter key to commit edit
       input.addEventListener('keydown', (e) => {
@@ -782,6 +996,11 @@
       var validation = this.validateTaskText(newText);
 
       if (validation.valid) {
+        // Duplicate check for edits (exclude current task from comparison)
+        if (this.isDuplicate(newText, taskId)) {
+          this._showError('This task already exists');
+          return;
+        }
         // Update the task in memory
         this.editTask(taskId, newText.trim());
         // Update the DOM
@@ -1107,6 +1326,7 @@
    */
   const App = {
     StorageManager: StorageManager,
+    ThemeManager: ThemeManager,
     GreetingPanel: GreetingPanel,
     FocusTimer: FocusTimer,
     TaskManager: TaskManager,
@@ -1128,8 +1348,10 @@
       var timerEl = document.getElementById('focus-timer');
       var taskEl = document.getElementById('task-manager');
       var linksEl = document.getElementById('quick-links');
+      var themeToggleBtn = document.getElementById('theme-toggle');
 
       if (greetingEl) GreetingPanel.init(greetingEl);
+      if (themeToggleBtn) ThemeManager.init(themeToggleBtn);
       if (timerEl) FocusTimer.init(timerEl);
       if (taskEl) TaskManager.init(taskEl);
       if (linksEl) QuickLinks.init(linksEl);

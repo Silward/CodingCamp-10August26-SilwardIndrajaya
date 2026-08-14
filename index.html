@@ -4,12 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>To-Do Life Dashboard</title>
+  <!-- Theme flash prevention: apply saved theme before CSS loads -->
+  <script>
+    (function() {
+      try {
+        var theme = localStorage.getItem('todo-dashboard-theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.setAttribute('data-theme', theme);
+        } else {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch(e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="css/style.css">
   <script src="js/app.js" defer></script>
 </head>
 <body>
   <header>
     <h1>To-Do Life Dashboard</h1>
+    <button id="theme-toggle" type="button" aria-label="Toggle light/dark theme" aria-pressed="false">
+      <span class="theme-icon" aria-hidden="true">&#9790;</span>
+    </button>
   </header>
 
   <main>
@@ -19,6 +37,16 @@
       <p id="current-time" aria-live="polite" aria-label="Current time"></p>
       <p id="current-date" aria-label="Current date"></p>
       <p id="greeting-message" aria-live="polite" aria-label="Greeting message"></p>
+      <div class="name-input-wrapper">
+        <label for="name-input" class="sr-only">Your name</label>
+        <input
+          type="text"
+          id="name-input"
+          placeholder="Enter your name..."
+          maxlength="50"
+          aria-label="Enter your name for personalized greeting"
+        >
+      </div>
     </section>
 
     <!-- Focus Timer -->
